@@ -75,6 +75,4 @@ streamlit run app/streamlit_app.py
 - Target: `G3` — final grade on a 0–20 scale.
 - File: data/raw/student-mat.csv.
 
----
 
-**Status**: Step 1 Complete ✓
