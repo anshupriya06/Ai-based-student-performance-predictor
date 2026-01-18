@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 import joblib
 import pandas as pd
 import streamlit as st
+import os
 
 # Ensure src is importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -31,7 +32,11 @@ from src.recommendation import (
 
 
 # Paths
-MODEL_PATH = Path("models/student_performance_model.pkl")
+
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+model_path = os.path.join(BASE_DIR, "models", "student_performance_model.pkl")
+
 FEATURE_COLUMNS_PATH = Path("models/feature_columns.json")
 
 
