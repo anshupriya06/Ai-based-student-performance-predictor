@@ -18,7 +18,6 @@ from typing import Any, Dict, List
 import joblib
 import pandas as pd
 import streamlit as st
-import os
 
 # Ensure src is importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -30,29 +29,39 @@ from src.recommendation import (
     categorize_performance,
 )
 
+# -----------------------------------------------------------------------------
+# Paths (deployment-safe)
+# -----------------------------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent.parent  # repo root
 
-# Paths
+MODEL_PATH = BASE_DIR / "models" / "student_performance_model.pkl"
+FEATURE_COLUMNS_PATH = BASE_DIR / "models" / "feature_columns.json"
 
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-model_path = os.path.join(BASE_DIR, "models", "student_performance_model.pkl")
-
-FEATURE_COLUMNS_PATH = Path("models/feature_columns.json")
-
-
+# -----------------------------------------------------------------------------
+# Loaders
+# -----------------------------------------------------------------------------
 @st.cache_resource(show_spinner=False)
-def load_model(path: Path = MODEL_PATH):
+def load_model():
     """Load trained RandomForestRegressor from disk."""
-    return joblib.load(path)
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"Model file not found at: {MODEL_PATH}")
+    return joblib.load(MODEL_PATH)
 
 
 @st.cache_data(show_spinner=False)
-def load_feature_columns(path: Path = FEATURE_COLUMNS_PATH) -> List[str]:
+def load_feature_columns() -> List[str]:
     """Load ordered feature columns used during training for alignment."""
-    with path.open("r", encoding="utf-8") as f:
+    if not FEATURE_COLUMNS_PATH.exists():
+        raise FileNotFoundError(f"Feature schema not found at: {FEATURE_COLUMNS_PATH}")
+
+    with FEATURE_COLUMNS_PATH.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
+# -----------------------------------------------------------------------------
+# Preprocessing
+# -----------------------------------------------------------------------------
 def preprocess_user_input(user_df: pd.DataFrame, feature_columns: List[str]) -> pd.DataFrame:
     """One-hot encode user inputs and align to training columns."""
     cat_cols = user_df.select_dtypes(exclude="number").columns
@@ -61,6 +70,9 @@ def preprocess_user_input(user_df: pd.DataFrame, feature_columns: List[str]) -> 
     return aligned
 
 
+# -----------------------------------------------------------------------------
+# UI Form
+# -----------------------------------------------------------------------------
 def build_input_form() -> Dict[str, Any]:
     """Collect minimal, high-impact student inputs for prediction."""
     st.subheader("Student Academic & Support Details")
@@ -80,7 +92,6 @@ def build_input_form() -> Dict[str, Any]:
         higher = st.selectbox("Wants Higher Education", ["yes", "no"], index=0)
         internet = st.selectbox("Internet Access", ["yes", "no"], index=0)
 
-    # Hidden default features (not shown to user)
     payload = {
         "G1": G1,
         "G2": G2,
@@ -93,6 +104,7 @@ def build_input_form() -> Dict[str, Any]:
         "internet": internet,
     }
 
+    # Hidden defaults (ensure these match training features)
     payload.update({
         "school": "GP",
         "sex": "F",
@@ -116,7 +128,9 @@ def build_input_form() -> Dict[str, Any]:
     return payload
 
 
-
+# -----------------------------------------------------------------------------
+# Output UI
+# -----------------------------------------------------------------------------
 def render_recommendations(score: float, level: PerformanceLevel, engine: RecommendationEngine):
     """Display predicted score, performance, and learning resources."""
     recs = engine.get_recommendations(score)
@@ -127,12 +141,21 @@ def render_recommendations(score: float, level: PerformanceLevel, engine: Recomm
 
     st.subheader("Recommended Learning Resources")
     for item in recs["resources"]:
-        st.markdown(
-            f"- **{item['title']}** ({item['type']}, {item['platform']}) — {item.get('difficulty', 'N/A')} "
-            f"[{item.get('link', '')}]({item.get('link', '')})"
-        )
+        title = item.get("title", "Resource")
+        rtype = item.get("type", "N/A")
+        platform = item.get("platform", "N/A")
+        difficulty = item.get("difficulty", "N/A")
+        link = item.get("link", "")
+
+        if link:
+            st.markdown(f"- **{title}** ({rtype}, {platform}) — {difficulty}  \n  🔗 {link}")
+        else:
+            st.markdown(f"- **{title}** ({rtype}, {platform}) — {difficulty}")
 
 
+# -----------------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------------
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, page_icon="🎓", layout="wide")
     st.title(APP_TITLE)
@@ -141,8 +164,9 @@ def main() -> None:
     try:
         model = load_model()
         feature_columns = load_feature_columns()
-    except Exception as exc:  # defensive: surface any loading issue
+    except Exception as exc:
         st.error(f"Failed to load model or feature schema: {exc}")
+        st.code(f"MODEL_PATH = {MODEL_PATH}\nFEATURE_COLUMNS_PATH = {FEATURE_COLUMNS_PATH}")
         return
 
     engine = RecommendationEngine()
@@ -157,7 +181,7 @@ def main() -> None:
     try:
         user_df = pd.DataFrame([user_inputs])
         aligned = preprocess_user_input(user_df, feature_columns)
-        prediction = model.predict(aligned)[0]
+        prediction = float(model.predict(aligned)[0])
         level = categorize_performance(prediction)
         render_recommendations(prediction, level, engine)
     except Exception as exc:
